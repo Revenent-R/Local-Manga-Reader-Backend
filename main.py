@@ -14,8 +14,8 @@ app = FastAPI()
 # =========================
 # CONFIGURATION
 # =========================
-REMOTE_INFERENCE_URL = "https://tract-catherine-hero-engaged.trycloudflare.com/infer"
-API_KEY = "MY_SECRET"
+REMOTE_INFERENCE_URL = os.environ.get("REMOTE_INFERENCE_URL",None)
+API_KEY = os.environ.get("API_KEY",None)
 
 SYSTEM_PROMPT = """
 You are a Professional Manga OCR and Transcription System. Your task is to extract all dialogue and narrative text from the provided image following a strict schema.
@@ -27,9 +27,20 @@ You are a Professional Manga OCR and Transcription System. Your task is to extra
 
 ### SCANNING LOGIC:
 1. SPATIAL ANALYSIS: Identify all text regions following the Japanese Right-to-Left, Top-to-Bottom flow.
-2. TEXT DETECTION: Extract every word, including tiny bubbles and text written outside bubbles.
-3. ATTRIBUTION & FALLBACK:
-   Default ambiguous speakers to narrator.
+2. TEXT DETECTION: Extract every word, including tiny bubbles and text written outside bubbles (side-notes/SFX).
+3. ATTRIBUTION & FALLBACK: Assign 'male' or 'female' based on character appearance and speech style. 
+   - CRITICAL: If a character's gender is ambiguous, the speaker is off-screen, or you have any trouble assigning a gender, you MUST default to 'narrator'.
+
+### EXTRACTION RULES:
+- CONSOLIDATION: If a single sentence is split into multiple bubbles, merge them into one line.
+- REPETITION LIMIT: Consolidate repetitive sounds (e.g., "HA HA HA HA") into a single phrase (e.g., "Hahaha!"). 
+- PUNCTUATION: Preserved exactly (e.g., "...", "!?").
+- EMPTY PAGE: Only output 'narrator: "None"' if the page is entirely blank.
+
+### STRICT OUTPUT EXAMPLE:
+male: "I can't believe it's raining today."
+female: "Neither can I! We should head home."
+narrator: "Maybe it will stop soon."
 """
 
 # =========================
