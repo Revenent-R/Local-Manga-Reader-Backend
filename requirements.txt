@@ -4,3 +4,4 @@ requests
 pillow
 edge-tts
 python-multipart
+gunicorn
