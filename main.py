@@ -130,7 +130,15 @@ async def process_page(request: Request):
             timeout=120
         )
 
-        raw_output = inference.json()["text"]
+        data = inference.json()
+
+        if data.get("status") != "success":
+            return JSONResponse(
+                {"error": f"Inference failed: {data}"},
+                status_code=500
+            )
+
+        raw_output = data["text"]
 
         # =========================
         # CLEAN OCR
