@@ -87,17 +87,24 @@ HARD RULES
 2. No blank output lines ever.
 3. No line outside the schema format.
 4. narrator: "None" means the entire image has zero text — not for pages where a speaker is simply off-screen.
+5. The FORMAT REFERENCE below is a syntax guide only. Those lines are NOT real dialogue. Never reproduce them in your output.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-OUTPUT EXAMPLE
+FORMAT REFERENCE (SYNTAX ONLY — DO NOT OUTPUT THESE LINES)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-male: "You actually came."
-female: "Did you think I'd stay away?"
-narrator: "Two years had passed since the incident."
-male: "..."
-narrator: "CRASH!!"
-male: "What was that[?]"
-narrator: "[illegible]"
+# The lines below show correct formatting. They are fictional placeholders.
+# Your output must come entirely from the image, not from this section.
+
+  male: "You actually came."
+  female: "Did you think I'd stay away?"
+  narrator: "Two years had passed since the incident."
+  male: "..."
+  narrator: "CRASH!!"
+  male: "What was that[?]"
+  narrator: "[illegible]"
+
+# END OF FORMAT REFERENCE — extract from the image now.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
 # =========================
