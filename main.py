@@ -135,7 +135,7 @@ def prepare_image(url):
     try:
         response = requests.get(url, timeout=75)
         img = Image.open(io.BytesIO(response.content)).convert("RGB")
-        img.thumbnail((2100, 2100))
+        img.thumbnail((1500, 1500))
         buffer = io.BytesIO()
         img.save(buffer, format="JPEG")
         return base64.b64encode(buffer.getvalue()).decode()
