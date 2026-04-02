@@ -128,6 +128,7 @@ async def process_page(request: Request):
         data = inference.json()
 
         if data.get("status") != "success":
+            print(f"Inference failed: {data}")
             return JSONResponse(
                 {"error": f"Inference failed: {data}"},
                 status_code=500
@@ -183,6 +184,7 @@ async def process_page(request: Request):
         }
 
     except Exception as e:
+        print(f'Error : {str(e)}')
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
