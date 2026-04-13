@@ -3,7 +3,7 @@ import base64
 import asyncio
 import io
 import re
-import requests
+import httpx
 from PIL import Image
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -14,9 +14,10 @@ app = FastAPI()
 # =========================
 # CONFIGURATION
 # =========================
-REMOTE_INFERENCE_URL = os.environ.get("REMOTE_INFERENCE_URL",None)
-API_KEY = os.environ.get("API_KEY",None)
+REMOTE_INFERENCE_URL = os.environ.get("REMOTE_INFERENCE_URL", None)
+API_KEY = os.environ.get("API_KEY", None)
 
+# Keeping your exact prompt
 SYSTEM_PROMPT = """
 You are a Manga OCR and Transcription System. Your sole purpose is to extract EVERY SINGLE piece of text explicitly visible in the image. Never invent, infer, summarize, or paraphrase dialogue.
 
@@ -100,7 +101,6 @@ FORMAT REFERENCE (SYNTAX ONLY — DO NOT OUTPUT THESE LINES)
 def is_speakable(text):
     return bool(re.search(r'[a-zA-Z0-9]', text))
 
-
 def clean_ocr_text(text):
     lines = text.strip().split("\n")
     cleaned_lines = []
@@ -124,18 +124,24 @@ def clean_ocr_text(text):
 
     return "\n".join(cleaned_lines)
 
-
-def prepare_image(url):
+# 🔥 Made this async using httpx so it doesn't block Render
+async def prepare_image(url: str, client: httpx.AsyncClient):
     try:
-        response = requests.get(url, timeout=75)
+        response = await client.get(url, timeout=75.0)
+        response.raise_for_status()
+        
+        # CPU-bound PIL operations should technically be in a thread, 
+        # but for simple resizing, it's fast enough here.
         img = Image.open(io.BytesIO(response.content)).convert("RGB")
-        img.thumbnail((2500, 2500))
+        # Explicit high-quality downsampling to save network bandwidth to your local PC
+        img.thumbnail((2500, 2500), Image.Resampling.LANCZOS) 
+        
         buffer = io.BytesIO()
-        img.save(buffer, format="JPEG")
+        img.save(buffer, format="JPEG", quality=85)
         return base64.b64encode(buffer.getvalue()).decode()
-    except Exception:
+    except Exception as e:
+        print(f"Image prep failed: {e}")
         return None
-
 
 async def get_voice_bytes(text, voice):
     if not is_speakable(text):
@@ -150,10 +156,9 @@ async def get_voice_bytes(text, voice):
                 final_data.extend(chunk["data"])
 
         return final_data
-
-    except Exception:
+    except Exception as e:
+        print(f"TTS Error for '{text}': {e}")
         return bytearray()
-
 
 # =========================
 # MAIN ROUTE
@@ -164,48 +169,51 @@ async def process_page(request: Request):
         data = await request.json()
         raw_url = data.get("text")
 
-        encoded_image = prepare_image(raw_url)
-        if not encoded_image:
-            return JSONResponse({"error": "Image fail"}, status_code=400)
+        if not raw_url:
+            return JSONResponse({"error": "No image URL provided"}, status_code=400)
 
-        # =========================
-        # REMOTE PC INFERENCE
-        # =========================
-        inference = requests.post(
-            REMOTE_INFERENCE_URL,
-            headers={"x-api-key": API_KEY},
-            json={
-                "image": encoded_image,
-                "prompt": SYSTEM_PROMPT
-            },
-            timeout=300
-        )
+        # 🔥 Using a single async client for all outbound requests
+        async with httpx.AsyncClient() as client:
+            
+            # 1. Download & Prepare Image
+            encoded_image = await prepare_image(raw_url, client)
+            if not encoded_image:
+                return JSONResponse({"error": "Failed to fetch or process image"}, status_code=400)
 
-        data = inference.json()
+            # 2. Remote PC Inference (Async)
+            try:
+                inference_response = await client.post(
+                    REMOTE_INFERENCE_URL,
+                    headers={"x-api-key": API_KEY},
+                    json={
+                        "image": encoded_image,
+                        "prompt": SYSTEM_PROMPT
+                    },
+                    timeout=300.0 # 5 minutes max for complex pages
+                )
+                inference_response.raise_for_status()
+                inference_data = inference_response.json()
+            except httpx.HTTPError as e:
+                print(f"Local Server Error: {e}")
+                return JSONResponse({"error": f"Failed to connect to local GPU: {str(e)}"}, status_code=502)
 
-        if data.get("status") != "success":
-            print(f"Inference failed: {data}")
+        if inference_data.get("status") != "success":
             return JSONResponse(
-                {"error": f"Inference failed: {data}"},
+                {"error": f"Inference failed: {inference_data.get('message', 'Unknown error')}"},
                 status_code=500
             )
 
-        raw_output = data["text"]
+        raw_output = inference_data.get("text", "")
 
-        # =========================
-        # CLEAN OCR
-        # =========================
+        # 3. Clean OCR
         cleaned_dialogue = clean_ocr_text(raw_output)
-        print(f"Final Cleaned OCR: {cleaned_dialogue}")
+        print(f"Final Cleaned OCR:\n{cleaned_dialogue}")
 
         if not cleaned_dialogue or "narrator: none" in cleaned_dialogue.lower():
             return {"response": "No text detected", "audio": "", "status": "empty"}
 
-        # =========================
-        # TTS
-        # =========================
+        # 4. TTS Generation (Concurrent)
         tasks = []
-
         for line in cleaned_dialogue.split("\n"):
             if ":" in line:
                 parts = line.split(":", 1)
@@ -240,14 +248,12 @@ async def process_page(request: Request):
         }
 
     except Exception as e:
-        print(f'Error : {str(e)}')
+        print(f'Critical Process Error: {str(e)}')
         return JSONResponse({"error": str(e)}, status_code=500)
-
 
 @app.get("/")
 def health_check():
     return {"status": "ok"}
-
 
 @app.head("/")
 def health_check_head():
