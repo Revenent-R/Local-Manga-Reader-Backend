@@ -11,13 +11,9 @@ import edge_tts
 
 app = FastAPI()
 
-# =========================
-# CONFIGURATION
-# =========================
 REMOTE_INFERENCE_URL = os.environ.get("REMOTE_INFERENCE_URL", None)
 API_KEY = os.environ.get("API_KEY", None)
 
-# Keeping your exact prompt
 SYSTEM_PROMPT = """
 You are a strict Manga OCR System. Your task is verbatim text extraction.
 
@@ -39,11 +35,10 @@ FORMATTING RULES:
 Do not output any markdown, preambles, or additional commentary. Extract the text now.
 """
 
-# =========================
-# UTILITIES
-# =========================
+
 def is_speakable(text):
     return bool(re.search(r'[a-zA-Z0-9]', text))
+
 
 def clean_ocr_text(text):
     lines = text.strip().split("\n")
@@ -68,24 +63,22 @@ def clean_ocr_text(text):
 
     return "\n".join(cleaned_lines)
 
-# 🔥 Made this async using httpx so it doesn't block Render
+
 async def prepare_image(url: str, client: httpx.AsyncClient):
     try:
         response = await client.get(url, timeout=75.0)
         response.raise_for_status()
-        
-        # CPU-bound PIL operations should technically be in a thread, 
-        # but for simple resizing, it's fast enough here.
+
         img = Image.open(io.BytesIO(response.content)).convert("RGB")
-        # Explicit high-quality downsampling to save network bandwidth to your local PC
-        img.thumbnail((2500, 2500), Image.Resampling.LANCZOS) 
-        
+        img.thumbnail((2500, 2500), Image.Resampling.LANCZOS)
+
         buffer = io.BytesIO()
         img.save(buffer, format="JPEG", quality=85)
         return base64.b64encode(buffer.getvalue()).decode()
     except Exception as e:
         print(f"Image prep failed: {e}")
         return None
+
 
 async def get_voice_bytes(text, voice):
     if not is_speakable(text):
@@ -104,9 +97,7 @@ async def get_voice_bytes(text, voice):
         print(f"TTS Error for '{text}': {e}")
         return bytearray()
 
-# =========================
-# MAIN ROUTE
-# =========================
+
 @app.post("/process_page")
 async def process_page(request: Request):
     try:
@@ -116,15 +107,12 @@ async def process_page(request: Request):
         if not raw_url:
             return JSONResponse({"error": "No image URL provided"}, status_code=400)
 
-        # 🔥 Using a single async client for all outbound requests
         async with httpx.AsyncClient() as client:
-            
-            # 1. Download & Prepare Image
+
             encoded_image = await prepare_image(raw_url, client)
             if not encoded_image:
                 return JSONResponse({"error": "Failed to fetch or process image"}, status_code=400)
 
-            # 2. Remote PC Inference (Async)
             try:
                 inference_response = await client.post(
                     REMOTE_INFERENCE_URL,
@@ -133,7 +121,7 @@ async def process_page(request: Request):
                         "image": encoded_image,
                         "prompt": SYSTEM_PROMPT
                     },
-                    timeout=300.0 # 5 minutes max for complex pages
+                    timeout=300.0
                 )
                 inference_response.raise_for_status()
                 inference_data = inference_response.json()
@@ -149,14 +137,12 @@ async def process_page(request: Request):
 
         raw_output = inference_data.get("text", "")
 
-        # 3. Clean OCR
         cleaned_dialogue = clean_ocr_text(raw_output)
         print(f"Final Cleaned OCR:\n{cleaned_dialogue}")
 
         if not cleaned_dialogue or "narrator: none" in cleaned_dialogue.lower():
             return {"response": "No text detected", "audio": "", "status": "empty"}
 
-        # 4. TTS Generation (Concurrent)
         tasks = []
         for line in cleaned_dialogue.split("\n"):
             if ":" in line:
@@ -195,9 +181,11 @@ async def process_page(request: Request):
         print(f'Critical Process Error: {str(e)}')
         return JSONResponse({"error": str(e)}, status_code=500)
 
+
 @app.get("/")
 def health_check():
     return {"status": "ok"}
+
 
 @app.head("/")
 def health_check_head():
